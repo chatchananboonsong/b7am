@@ -31,7 +31,8 @@ class MockRobotActuators:
         self.cur_x = 0.0
         self.cur_y = 0.0
         self.cur_yaw = 0.0
-        self.gripper_state = "closed"
+        self.gimbal_yaw = 0.0
+        self.gimbal_pitch = 0.0
 
     def move(self, x: float = 0.0, y: float = 0.0, z: float = 0.0, xy_speed: float = 0.5, z_speed: float = 30.0):
         """Simulates linear movement (x forward/backward, y left/right, z rotation deg)."""
@@ -56,7 +57,8 @@ class MockRobotActuators:
                     yaw=self.cur_yaw,
                     pos_x=self.cur_x,
                     pos_y=self.cur_y,
-                    gripper_status=self.gripper_state,
+                    gimbal_yaw=self.gimbal_yaw,
+                    gimbal_pitch=self.gimbal_pitch,
                 )
 
     def drive_speed(self, x: float = 0.0, y: float = 0.0, z: float = 0.0, timeout: Optional[float] = None):
@@ -76,7 +78,8 @@ class MockRobotActuators:
                 yaw=self.cur_yaw,
                 pos_x=self.cur_x,
                 pos_y=self.cur_y,
-                gripper_status=self.gripper_state,
+                gimbal_yaw=self.gimbal_yaw,
+                gimbal_pitch=self.gimbal_pitch,
             )
         if timeout:
             time.sleep(timeout / self.speed_mult)
@@ -84,22 +87,21 @@ class MockRobotActuators:
     def stop(self):
         self.drive_speed(0, 0, 0)
 
-    def open_gripper(self, power: int = 50):
-        time.sleep(0.15 / self.speed_mult)
-        self.gripper_state = "opened"
+    def rotate_gimbal(self, pitch: float = 0.0, yaw: float = 0.0, pitch_speed: float = 100.0, yaw_speed: float = 100.0):
+        """Simulates gimbal rotation."""
+        duration = max(0.04, abs(yaw - self.gimbal_yaw) / max(1.0, yaw_speed) / self.speed_mult)
+        time.sleep(duration)
+        self.gimbal_pitch = pitch
+        self.gimbal_yaw = yaw
         if self.collector:
-            self.collector.inject_mock_data(gripper_status=self.gripper_state)
+            self.collector.inject_mock_data(
+                gimbal_yaw=self.gimbal_yaw,
+                gimbal_pitch=self.gimbal_pitch,
+            )
 
-    def close_gripper(self, power: int = 50):
-        time.sleep(0.15 / self.speed_mult)
-        self.gripper_state = "closed"
-        if self.collector:
-            self.collector.inject_mock_data(gripper_status=self.gripper_state)
-
-    def pause_gripper(self):
-        self.gripper_state = "normal"
-        if self.collector:
-            self.collector.inject_mock_data(gripper_status=self.gripper_state)
+    def recenter_gimbal(self, speed: float = 100.0):
+        """Recenters simulated gimbal to 0°."""
+        self.rotate_gimbal(pitch=0.0, yaw=0.0, pitch_speed=speed, yaw_speed=speed)
 
 
 class RobotControllerThread(threading.Thread):
@@ -125,6 +127,7 @@ class RobotControllerThread(threading.Thread):
         self.target_heading_deg = 0.0
 
         self._running = threading.Event()
+        self._running.set()
         self._pause_event = threading.Event()
         self._pause_event.set()
 
@@ -140,6 +143,14 @@ class RobotControllerThread(threading.Thread):
         self.current_step: int = 0
         self.plan_completed: bool = False
         self.step_pause_sec: float = 0.05 if mock_mode else 1.0  # 1.0s pause between states on live robot
+        self.ui_tick: Optional[Callable[[], None]] = None
+
+    def _tick_ui(self):
+        if self.ui_tick is not None:
+            try:
+                self.ui_tick()
+            except Exception as exc:
+                print(f"[Controller] UI update warning: {exc}")
 
     def load_plan_from_file(self, json_path: str):
         """Loads execution plan commands from robot_map_plan.json."""
@@ -186,28 +197,81 @@ class RobotControllerThread(threading.Thread):
             except Exception:
                 pass
 
-    def operate_gripper(self, action_name: str, power: int = 50):
-        """Opens or closes Gripper."""
-        self.current_action = f"GRIPPER_{action_name.upper()}"
-        print(f"[Controller] Gripper action: {action_name}...")
+    def back_away_from_front_wall(self, target_mm: float = 250.0,
+                                  tolerance_mm: float = 15.0,
+                                  max_duration_sec: float = 3.0,
+                                  max_reverse_speed: float = 0.12) -> bool:
+        """Reverse slowly until a valid front ToF reading reaches the requested clearance."""
+        if self.mock_mode or self.robot is None:
+            self.stop_chassis()
+            return True
+
+        start_time = time.monotonic()
+        stable_readings = 0
+        self.current_action = "BACKING_AWAY_FROM_FRONT_WALL"
+        try:
+            while time.monotonic() - start_time < max_duration_sec:
+                state = self.sensor_hub.get_latest_state()
+                if not state.tof_valid or state.tof_filtered_mm is None:
+                    self.stop_chassis()
+                    print("[Controller] ToF invalid while reversing; stopped for safety.")
+                    return False
+
+                distance = float(state.tof_filtered_mm)
+                if distance >= target_mm - tolerance_mm:
+                    stable_readings += 1
+                    self.stop_chassis()
+                    if stable_readings >= 3:
+                        print(f"[Controller] Front clearance reached {distance:.0f} mm; stopped.")
+                        return True
+                    time.sleep(0.05)
+                    continue
+
+                stable_readings = 0
+                # Negative chassis x moves backward; keep yaw and lateral axes locked.
+                reverse_speed = min(max_reverse_speed, max(0.04, (target_mm - distance) / 1000.0))
+                self.drive_speed(vx=-reverse_speed, vy=0.0, vz=0.0)
+                time.sleep(0.05)
+
+            self.stop_chassis()
+            final_state = self.sensor_hub.get_latest_state()
+            final_mm = final_state.tof_filtered_mm
+            print(f"[Controller] Back-away timeout at ToF={final_mm} mm; stopped.")
+            return bool(final_state.tof_valid and final_mm is not None and final_mm >= target_mm - tolerance_mm)
+        finally:
+            self.stop_chassis()
+
+    def rotate_gimbal(self, yaw: float = 0.0, pitch: float = 0.0, speed: float = 150.0):
+        """Rotates gimbal to specified relative angle (yaw: 0 front, -90 right, +90 left, 180 back)."""
+        self.current_action = f"GIMBAL_ROTATE_YAW_{yaw:+.0f}"
+        print(f"[Controller] Rotating Gimbal: yaw={yaw:+.0f}°, pitch={pitch:+.0f}°...")
 
         if self.mock_mode or self.robot is None:
             if self.mock_actuator:
-                if action_name.lower() == "open":
-                    self.mock_actuator.open_gripper(power=power)
-                elif action_name.lower() == "close":
-                    self.mock_actuator.close_gripper(power=power)
-                else:
-                    self.mock_actuator.pause_gripper()
+                self.mock_actuator.rotate_gimbal(pitch=pitch, yaw=yaw, yaw_speed=speed)
         else:
-            if hasattr(self.robot, "gripper"):
-                if action_name.lower() == "open":
-                    self.robot.gripper.open(power=power)
-                elif action_name.lower() == "close":
-                    self.robot.gripper.close(power=power)
-                else:
-                    self.robot.gripper.pause()
-                time.sleep(0.5)
+            if hasattr(self.robot, "gimbal"):
+                try:
+                    action = self.robot.gimbal.moveto(pitch=int(pitch), yaw=int(yaw), pitch_speed=int(speed), yaw_speed=int(speed))
+                    action.wait_for_completed(timeout=3.0)
+                except Exception as e:
+                    print(f"[Controller] Gimbal moveto error: {e}")
+
+    def recenter_gimbal(self, speed: float = 150.0):
+        """Recenters gimbal back to 0° (front)."""
+        self.current_action = "GIMBAL_RECENTER"
+        print("[Controller] Recentering Gimbal to 0° (Front)...")
+
+        if self.mock_mode or self.robot is None:
+            if self.mock_actuator:
+                self.mock_actuator.recenter_gimbal(speed=speed)
+        else:
+            if hasattr(self.robot, "gimbal"):
+                try:
+                    action = self.robot.gimbal.recenter(pitch_speed=int(speed), yaw_speed=int(speed))
+                    action.wait_for_completed(timeout=3.0)
+                except Exception as e:
+                    print(f"[Controller] Gimbal recenter error: {e}")
 
     # -----------------------------------------------------------------------
     # Step 3: Grid-by-Grid Navigation & PID Centering
@@ -219,8 +283,9 @@ class RobotControllerThread(threading.Thread):
         self.wall_pid.reset()
 
         while time.monotonic() < t_end and self._running.is_set():
+            self._tick_ui()
             state = self.sensor_hub.get_latest_state()
-            _, vy, vz, case_name, case_id, err_y = self.wall_pid.compute_control_speeds(
+            _, vy, _vz, case_name, case_id, err_y = self.wall_pid.compute_control_speeds(
                 state=state,
                 target_yaw_deg=self.target_heading_deg,
                 base_vx=0.0,
@@ -228,17 +293,20 @@ class RobotControllerThread(threading.Thread):
             )
 
             # If error is within 20mm deadband, vy will be 0.0
-            if abs(err_y) < 20.0 and abs(vz) < 1.0:
+            # This is only a lateral position trim at the end of a grid step.
+            # Do not turn the chassis here: when the gimbal is tilted/scanning,
+            # the user wants the robot's front direction to remain fixed.
+            if abs(err_y) < 20.0:
                 # Already centered!
                 self.stop_chassis()
                 break
 
-            self.drive_speed(vx=0.0, vy=vy, vz=vz)
+            self.drive_speed(vx=0.0, vy=vy, vz=0.0)
             time.sleep(0.05)
 
         self.stop_chassis()
 
-    def navigate_single_grid_step(self, step_idx: int = 1, total_steps: int = 1):
+    def navigate_single_grid_step(self, step_idx: int = 1, total_steps: int = 1) -> bool:
         """Navigates exactly 1 grid cell (60 cm) using closed-loop PID lateral centering."""
         self.current_action = f"NAVIGATE_GRID_{step_idx}_OF_{total_steps}"
         print(f"\n  [Grid Step {step_idx}/{total_steps}] Moving 1 cell forward ({self.grid_size_m:.2f} m)...")
@@ -249,6 +317,7 @@ class RobotControllerThread(threading.Thread):
 
         self.wall_pid.reset()
         dist_traveled = 0.0
+        reached_target = False
         control_loop_hz = 20.0
         dt = 1.0 / control_loop_hz
         max_duration = (self.grid_size_m / max(0.1, self.base_speed)) * 1.8 + 1.5
@@ -258,6 +327,7 @@ class RobotControllerThread(threading.Thread):
 
         while dist_traveled < self.grid_size_m and self._running.is_set():
             loop_t0 = time.monotonic()
+            self._tick_ui()
             if (loop_t0 - t_start) > max_duration:
                 print(f"  [Warning] Grid step reached timeout limit ({max_duration:.1f}s).")
                 break
@@ -271,6 +341,25 @@ class RobotControllerThread(threading.Thread):
             rad = math.radians(self.target_heading_deg)
             forward_step_m = dx * math.cos(rad) + dy * math.sin(rad)
             dist_traveled = max(0.0, forward_step_m if not self.mock_mode else math.sqrt(dx * dx + dy * dy))
+
+            # The selected command is one grid step. Once odometry confirms
+            # that step is complete, report success before the front-wall
+            # safety threshold can mistake the next cell's wall for an
+            # obstacle encountered mid-step.
+            if dist_traveled >= self.grid_size_m:
+                reached_target = True
+                break
+
+            # Check front ToF before issuing this loop's movement command.
+            if not self.mock_mode:
+                if not state.tof_valid or state.tof_filtered_mm is None:
+                    print("  [MOVE ABORTED] ToF became invalid during the grid step; stopping chassis.")
+                    break
+                if state.tof_filtered_mm < 250.0:
+                    print(f"  [Front Wall Too Close] ToF={state.tof_filtered_mm:.1f} mm; backing away toward 250 mm.")
+                    self.stop_chassis()
+                    self.back_away_from_front_wall(target_mm=250.0, tolerance_mm=0.0)
+                    break
 
             # 3. Check remaining distance to grid cell boundary (60 cm)
             rem_dist = self.grid_size_m - dist_traveled
@@ -294,14 +383,6 @@ class RobotControllerThread(threading.Thread):
             # 5. Drive chassis holonomically (Forward vx + Lateral correction vy + Yaw lock vz)
             self.drive_speed(vx=vx, vy=vy, vz=vz)
 
-            # Check if front wall reached before full 60cm (safety)
-            # Only stop on ToF if robot has already moved at least 0.35m or if dangerously close (< 90mm)
-            has_front, _, _ = self.wall_pid.classify_wall_state(state)
-            if has_front and state.tof_filtered_mm is not None:
-                if (dist_traveled >= 0.35 and state.tof_filtered_mm <= self.wall_pid.front_target_mm) or (state.tof_filtered_mm < 90.0):
-                    print(f"  [Front Wall Reach] Stopped at ToF={state.tof_filtered_mm:.1f} mm (Target: {self.wall_pid.front_target_mm} mm)")
-                    break
-
             # Sleep remaining loop dt
             loop_elapsed = time.monotonic() - loop_t0
             if dt > loop_elapsed:
@@ -309,13 +390,11 @@ class RobotControllerThread(threading.Thread):
 
         self.stop_chassis()
 
-        # Perform fine centering alignment at cell center
-        self.align_at_cell_center(duration_sec=0.3)
-
         # Log completion state
         end_state = self.sensor_hub.get_latest_state()
         diff_str = f"{end_state.sharp_diff_mm:+.1f} mm" if (end_state.wall_left_detected and end_state.wall_right_detected) else "N/A"
         print(f"  [Grid Step {step_idx}/{total_steps} Done] Local Pos: ({end_state.pos_x:+.2f}m, {end_state.pos_y:+.2f}m) | Yaw: {end_state.yaw:+.1f}° | Sharp L: {end_state.sharp_left_mm} mm | R: {end_state.sharp_right_mm} mm | Diff: {diff_str} | ToF: {end_state.tof_filtered_mm} mm")
+        return reached_target
 
     def move_forward_grid(self, cells: int = 1):
         """Executes multi-cell forward motion grid-by-grid with closed-loop PID centering."""
@@ -345,7 +424,16 @@ class RobotControllerThread(threading.Thread):
         else:
             # Execute turn with SDK chassis.move
             action = self.robot.chassis.move(x=0, y=0, z=deg, z_speed=speed)
-            action.wait_for_completed()
+            turn_start = time.monotonic()
+            turn_timeout = abs(deg) / max(1.0, speed) * 3.0 + 3.0
+            while not action.is_completed:
+                self._tick_ui()
+                if time.monotonic() - turn_start > turn_timeout:
+                    self.stop_chassis()
+                    raise TimeoutError("Chassis turn did not complete before UI-safe timeout")
+                time.sleep(0.02)
+            if hasattr(action, "has_succeeded") and not action.has_succeeded:
+                raise RuntimeError(f"Chassis turn failed: {getattr(action, 'state', 'unknown')}")
 
         # Stop chassis and reset PID states cleanly
         self.stop_chassis()
@@ -371,6 +459,41 @@ class RobotControllerThread(threading.Thread):
     def turn_around(self, speed: float = 45.0):
         """กลับหลังหัน z = 180 องศา."""
         self.turn_to_relative(deg=180.0, speed=speed)
+
+    def trim_heading(self, max_adjust_deg: float = 2.0, speed: float = 10.0,
+                     deadband_deg: float = 0.5) -> bool:
+        """Apply one small chassis yaw correction toward the current grid heading."""
+        state = self.sensor_hub.get_latest_state()
+        error = (self.target_heading_deg - state.yaw + 180.0) % 360.0 - 180.0
+        if abs(error) <= deadband_deg:
+            print(f"[Controller] Yaw trim skipped; error {error:+.2f}° is within deadband.")
+            return True
+
+        adjustment = max(-abs(max_adjust_deg), min(abs(max_adjust_deg), error))
+        # SDK z has the opposite sign from the reported IMU yaw change.
+        sdk_z = -adjustment
+        self.current_action = "PERIODIC_YAW_TRIM"
+        self.stop_chassis()
+        print(f"[Controller] Small yaw trim {adjustment:+.2f}° toward grid heading.")
+        try:
+            if self.mock_mode or self.robot is None:
+                if self.mock_actuator:
+                    self.mock_actuator.move(z=sdk_z, z_speed=speed)
+                else:
+                    return False
+            else:
+                action = self.robot.chassis.move(x=0, y=0, z=sdk_z, z_speed=speed)
+                timeout = abs(adjustment) / max(1.0, speed) * 3.0 + 1.0
+                if hasattr(action, "wait_for_completed"):
+                    action.wait_for_completed(timeout=timeout)
+                if hasattr(action, "has_succeeded") and not action.has_succeeded:
+                    raise RuntimeError(f"Yaw trim action failed: {getattr(action, 'state', 'unknown')}")
+            return True
+        except Exception as exc:
+            print(f"[Controller] Yaw trim failed: {exc}")
+            return False
+        finally:
+            self.stop_chassis()
 
     def emergency_stop(self):
         """Stops all robot motion immediately."""
@@ -408,10 +531,13 @@ class RobotControllerThread(threading.Thread):
             self.turn_left()
         elif "Turn Around (180 deg)" in cmd:
             self.turn_around()
-        elif "Gripper Open" in cmd:
-            self.operate_gripper("open")
-        elif "Gripper Close" in cmd:
-            self.operate_gripper("close")
+        elif "Gimbal Recenter" in cmd:
+            self.recenter_gimbal()
+        elif "Gimbal Rotate" in cmd:
+            # e.g. "Gimbal Rotate: yaw=-90"
+            parts = cmd.split(":")
+            yaw_val = float(parts[1].replace("yaw=", "").strip()) if len(parts) > 1 else 0.0
+            self.rotate_gimbal(yaw=yaw_val)
         else:
             print(f"  [Warning] Unknown command format: {cmd}")
 

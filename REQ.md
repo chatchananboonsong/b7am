@@ -69,3 +69,8 @@
 | **3. เดินทีละ Grid + PID Centering (8 Cases)** | [docs/STEP3_PID.md](docs/STEP3_PID.md) | [src/pid_controller.py](src/pid_controller.py), [src/robot_controller.py](src/robot_controller.py) | `.venv/bin/python main.py step-test --cells 1 --conn-type ap` |
 | **4. Gripper วางของ** | *(Next Step)* | [src/robot_controller.py](src/robot_controller.py) | `.venv/bin/python main.py run --conn-type ap` |
 | **5. แผนที่และคำสั่ง JSON** | [README.md](README.md) | [src/map_planner.py](src/map_planner.py) | `.venv/bin/python main.py map` |
+
+
+
+python explore.py --conn-type ap --grid 6x6 --cell-size-cm 60
+python explore.py --conn-type ap --grid 6x6 --cell-size-cm 60 --start 1,5

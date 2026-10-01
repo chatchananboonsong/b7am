@@ -18,6 +18,13 @@ import time
 from pathlib import Path
 
 
+# Prefer this project's bundled SDK so runtime fixes are not shadowed by an
+# older copy installed in the virtual environment's site-packages.
+_BUNDLED_SDK_SRC = Path(__file__).resolve().parents[1] / "RoboMaster-SDK" / "src"
+if _BUNDLED_SDK_SRC.is_dir() and str(_BUNDLED_SDK_SRC) not in sys.path:
+    sys.path.insert(0, str(_BUNDLED_SDK_SRC))
+
+
 SENSORS = ("sharp_left", "sharp_right", "tof", "gripper")
 DEFAULT_DEGREES = {"sharp_left": 2, "sharp_right": 2, "tof": 1, "gripper": 1}
 

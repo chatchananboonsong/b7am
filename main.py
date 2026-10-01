@@ -41,7 +41,7 @@ if str(_SRC_DIR) not in sys.path:
 import json
 from typing import List
 
-from src.gripper_controller import SimpleGripperController
+from src.gimbal_controller import GimbalScanController
 from src.robot_system import RobotSystem
 from src.telemetry import TelemetryAnalyzer
 
@@ -71,10 +71,8 @@ def parse_custom_commands(cmd_input: str) -> List[str]:
             parsed.append("Turn Right (90 deg)")
         elif "around" in low or "180" in low:
             parsed.append("Turn Around (180 deg)")
-        elif "open" in low:
-            parsed.append("Gripper Open")
-        elif "close" in low:
-            parsed.append("Gripper Close")
+        elif "recenter" in low:
+            parsed.append("Gimbal Recenter")
         else:
             parsed.append(item)
     return parsed
@@ -93,28 +91,13 @@ def confirm_action(prompt: str, auto_yes: bool = False) -> bool:
         return False
 
 
-def run_pick_and_wait_for_navigation(sys_runner: RobotSystem, args):
-    gripper_ctrl = SimpleGripperController(
-        ep_robot=sys_runner.robot,
-        dry_run=sys_runner.mock_mode,
-    )
+def run_navigation_plan(sys_runner: RobotSystem, args):
+    """Executes navigation plan with Step 3 PID centering (without gripper actions)."""
     auto_yes = getattr(args, "yes", False)
+    if not confirm_action("Start following the map now?", auto_yes=auto_yes):
+        return None
 
-    # 1. Pick sequence
-    if not getattr(args, "skip_pick", False):
-        if not confirm_action("Start pick now?", auto_yes=auto_yes):
-            return None
-        gripper_ctrl.pick(
-            extend_cm=getattr(args, "extend_cm", 7.0),
-            lift_cm=getattr(args, "lift_cm", 10.0),
-        )
-        if not confirm_action("Pick finished. Start following the map now?", auto_yes=auto_yes):
-            return None
-    else:
-        if not confirm_action("Start following the map now?", auto_yes=auto_yes):
-            return None
-
-    # 2. Setup threads and command queue
+    # Setup threads and command queue
     sys_runner.setup_threads(plan_file=args.plan)
     if hasattr(args, "commands") and args.commands and sys_runner.thread_2_controller:
         custom_cmds = parse_custom_commands(args.commands)
@@ -126,17 +109,15 @@ def run_pick_and_wait_for_navigation(sys_runner: RobotSystem, args):
         sys_runner.thread_2_controller.base_speed = args.speed
         sys_runner.thread_2_controller.wall_pid.nominal_side_dist_mm = args.nominal_side
 
-    # 3. Start multi-threading navigation
+    # Start multi-threading navigation
     sys_runner.start()
     reached_goal = sys_runner.wait_for_completion(
         timeout=args.duration if args.duration > 0 else None
     )
-
-    # 4. Drop sequence at goal
-    if reached_goal and not getattr(args, "skip_drop", False):
-        gripper_ctrl.drop(chassis=sys_runner.robot.chassis if sys_runner.robot else None)
-    elif not reached_goal:
-        print("[main] Navigation did not reach the goal; drop skipped.")
+    if reached_goal:
+        print("[main] Navigation completed successfully!")
+    else:
+        print("[main] Navigation stopped or timed out.")
 
     return reached_goal
 
@@ -159,7 +140,7 @@ def cmd_simulate(args):
 
     signal.signal(signal.SIGINT, sig_handler)
     try:
-        run_pick_and_wait_for_navigation(sys_runner, args)
+        run_navigation_plan(sys_runner, args)
     finally:
         sys_runner.shutdown()
 
@@ -186,7 +167,7 @@ def cmd_run(args):
 
     signal.signal(signal.SIGINT, sig_handler)
     try:
-        run_pick_and_wait_for_navigation(sys_runner, args)
+        run_navigation_plan(sys_runner, args)
     finally:
         sys_runner.shutdown()
     return 0
@@ -328,6 +309,42 @@ def cmd_map(args):
     launch_map_gui()
 
 
+def cmd_explore(args):
+    from src.explorer import main as launch_explorer
+    cli_args = []
+    if args.mock:
+        cli_args.append("--mock")
+    if args.conn_type:
+        cli_args.extend(["--conn-type", args.conn_type])
+    if args.strategy:
+        cli_args.extend(["--strategy", args.strategy])
+    if getattr(args, "grid", None):
+        cli_args.extend(["--grid", str(args.grid)])
+    if args.rows is not None:
+        cli_args.extend(["--rows", str(args.rows)])
+    if args.cols is not None:
+        cli_args.extend(["--cols", str(args.cols)])
+    if getattr(args, "cell_size", None) is not None:
+        cli_args.extend(["--cell-size", str(args.cell_size)])
+    if getattr(args, "cell_size_cm", None) is not None:
+        cli_args.extend(["--cell-size-cm", str(args.cell_size_cm)])
+    if args.start_col is not None:
+        cli_args.extend(["--start-col", str(args.start_col)])
+    if args.start_row is not None:
+        cli_args.extend(["--start-row", str(args.start_row)])
+    if args.output:
+        cli_args.extend(["--output", args.output])
+    if args.sim_map:
+        cli_args.extend(["--sim-map", args.sim_map])
+    if args.speed:
+        cli_args.extend(["--speed", str(args.speed)])
+    if args.step_delay is not None:
+        cli_args.extend(["--step-delay", str(args.step_delay)])
+    if args.max_steps:
+        cli_args.extend(["--max-steps", str(args.max_steps)])
+    return launch_explorer(cli_args)
+
+
 def main():
     parser = argparse.ArgumentParser(description="RoboMaster EP Autonomous Navigation System (Steps 1-3)")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -343,10 +360,6 @@ def main():
     run_p.add_argument("--nominal-side", type=float, default=140.0, help="Nominal distance to single wall (mm)")
     run_p.add_argument("--duration", type=float, default=0.0, help="Max duration in seconds")
     run_p.add_argument("--backward-cm", type=float, help="Run one backward move for this distance in cm")
-    run_p.add_argument("--extend-cm", type=float, default=7.0, help="Arm extension during pick")
-    run_p.add_argument("--lift-cm", type=float, default=10.0, help="Arm lift during pick")
-    run_p.add_argument("--skip-pick", action="store_true", help="Skip initial gripper pick")
-    run_p.add_argument("--skip-drop", action="store_true", help="Skip final gripper drop")
     run_p.add_argument("-y", "--yes", action="store_true", help="Auto-confirm all interactive prompts")
     run_p.add_argument("--allow-mock-fallback", action="store_true", help="Fallback to mock if robot unavailable")
 
@@ -360,10 +373,6 @@ def main():
     sim_p.add_argument("--nominal-side", type=float, default=140.0, help="Nominal distance to single wall (mm)")
     sim_p.add_argument("--duration", type=float, default=0.0, help="Max duration in seconds")
     sim_p.add_argument("--backward-cm", type=float, help="Run one backward move for this distance in cm")
-    sim_p.add_argument("--extend-cm", type=float, default=7.0, help="Arm extension during pick")
-    sim_p.add_argument("--lift-cm", type=float, default=10.0, help="Arm lift during pick")
-    sim_p.add_argument("--skip-pick", action="store_true", help="Skip initial gripper pick")
-    sim_p.add_argument("--skip-drop", action="store_true", help="Skip final gripper drop")
     sim_p.add_argument("-y", "--yes", action="store_true", help="Auto-confirm all interactive prompts")
 
     # 3. Step-test
@@ -416,6 +425,24 @@ def main():
     # 8. Map GUI
     subparsers.add_parser("map", help="Launch interactive Grid Map & A* Planner GUI")
 
+    # 9. Autonomous Explore
+    exp_p = subparsers.add_parser("explore", help="Autonomous Grid Maze Exploration with Wall Avoidance")
+    exp_p.add_argument("--mock", action="store_true", help="Run in mock simulation mode")
+    exp_p.add_argument("--conn-type", choices=("ap", "sta"), default="ap", help="Connection mode")
+    exp_p.add_argument("--strategy", choices=("dfs", "wall-follow"), default="dfs", help="Exploration strategy")
+    exp_p.add_argument("--grid", "--size", dest="grid", default=None, help="Grid size formatted as COLSxROWS (e.g. 4x4, 5x6, 6x6)")
+    exp_p.add_argument("--rows", type=int, default=None, help="Grid rows count (default: 6)")
+    exp_p.add_argument("--cols", type=int, default=None, help="Grid columns count (default: 5)")
+    exp_p.add_argument("--cell-size", type=float, default=0.60, help="Grid cell size in meters (default: 0.60)")
+    exp_p.add_argument("--cell-size-cm", type=float, default=None, help="Grid cell size in centimeters (e.g. 60 or 50)")
+    exp_p.add_argument("--start-col", type=int, default=None, help="Initial column index (default: 0)")
+    exp_p.add_argument("--start-row", type=int, default=None, help="Initial row index (default: rows - 1)")
+    exp_p.add_argument("--output", default="data/explored_map.json", help="Output file path to save discovered map")
+    exp_p.add_argument("--sim-map", default="data/robot_map_plan.json", help="Ground truth map for simulation mode")
+    exp_p.add_argument("--speed", type=float, default=0.22, help="Base forward speed (m/s)")
+    exp_p.add_argument("--step-delay", type=float, default=0.4, help="Pause delay between steps (s)")
+    exp_p.add_argument("--max-steps", type=int, default=120, help="Maximum number of steps before stopping")
+
     args = parser.parse_args()
 
     if args.command == "simulate":
@@ -434,6 +461,8 @@ def main():
         return cmd_calibrate(args)
     elif args.command == "map":
         return cmd_map(args)
+    elif args.command == "explore":
+        return cmd_explore(args)
     return 0
 
 

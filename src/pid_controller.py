@@ -97,7 +97,7 @@ class WallCenteringPID:
     # Corridor inner width ~ 525mm, Robot width 250mm -> ~137.5mm each side
     DEFAULT_NOMINAL_SIDE_MM = 140.0
     DEADBAND_TOLERANCE_MM = 12.5  # 2 cm tolerance as specified in REQ (|L-R| < 2cm, L/R +- 2cm)
-    WALL_DETECT_THRESHOLD_MM = 260.0  # Max distance to consider side wall present
+    WALL_DETECT_THRESHOLD_MM = 450.0  # Max distance to consider a wall present (45 cm)
     FRONT_WALL_STOP_MM = 150.0  # Distance from front ToF to front wall at grid center
 
     def __init__(
@@ -105,18 +105,20 @@ class WallCenteringPID:
         nominal_side_dist_mm: float = DEFAULT_NOMINAL_SIDE_MM,
         tolerance_mm: float = DEADBAND_TOLERANCE_MM,
         front_target_mm: float = FRONT_WALL_STOP_MM,
+        preferred_side_mm: float = 150.0,
         lateral_kp: float = 0.0010,  # Smooth lateral centering (50mm error -> ~0.09 m/s)
         lateral_ki: float = 0.0001,
         lateral_kd: float = 0.0010,  # Damping to prevent oscillating across corridor
         max_lateral_speed: float = 0.17,  # Max vy m/s (gentle correction)
         yaw_kp: float = 1.8,  # Active Heading Hold: 1 deg error -> 1.8 deg/s vz
-        yaw_ki: float = 0.05,  # Eliminates steady-state heading drift
+        yaw_ki: float = 0.03,  # Eliminates steady-state heading drift
         yaw_kd: float = 0.15,  # Strong derivative damping against heading wobble
         max_yaw_speed: float = 35.0,  # Max vz deg/s
     ):
         self.nominal_side_dist_mm = nominal_side_dist_mm
         self.tolerance_mm = tolerance_mm
         self.front_target_mm = front_target_mm
+        self.preferred_side_mm = preferred_side_mm
 
         # Lateral (Y-axis) PID: error in mm -> vy in m/s
         self.pid_lateral = PIDController(
@@ -163,7 +165,7 @@ class WallCenteringPID:
         has_front = (
             state.tof_valid
             and state.tof_filtered_mm is not None
-            and state.tof_filtered_mm < 350.0
+            and state.tof_filtered_mm < self.WALL_DETECT_THRESHOLD_MM
         )
         return has_front, has_left, has_right
 
@@ -173,7 +175,20 @@ class WallCenteringPID:
         l_mm = state.sharp_left_mm
         r_mm = state.sharp_right_mm
 
-        if has_front:
+        # If both side sensors see walls at different distances, follow the
+        # nearer wall at the requested clearance instead of centering between
+        # the walls. Error sign matches the existing vy convention:
+        # positive moves away from the left wall; negative away from right.
+        if has_left and has_right and l_mm is not None and r_mm is not None:
+            if l_mm <= r_mm:
+                error_y = self.preferred_side_mm - l_mm
+                side_name = "left"
+            else:
+                error_y = r_mm - self.preferred_side_mm
+                side_name = "right"
+            case_name = f"Side Follow: {side_name} wall target {self.preferred_side_mm:.0f}mm"
+            case_id = 31 if side_name == "left" else 32
+        elif has_front:
             # Case 1: Front Wall present
             if has_left and has_right and l_mm is not None and r_mm is not None:
                 # Case 1.1: Walls on both sides -> error = R - L

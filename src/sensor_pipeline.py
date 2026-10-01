@@ -223,6 +223,7 @@ class RobotSensorSnapshot:
     tof_raw: Optional[float] = None
     tof_filtered_mm: Optional[float] = None
     tof_valid: bool = False
+    tof_sample_id: int = 0
 
     # IMU / Attitude (degrees)
     yaw: float = 0.0      # Relative locked yaw (starts at 0.0 deg on startup)
@@ -258,7 +259,8 @@ class RobotSensorSnapshot:
     is_static: bool = True
     impact_detected: bool = False
     slip_detected: bool = False
-    gripper_status: str = "normal"  # "opened", "closed", "normal"
+    gimbal_yaw: float = 0.0    # Gimbal yaw relative to chassis (deg)
+    gimbal_pitch: float = 0.0  # Gimbal pitch relative to chassis (deg)
 
     # Derived Wall Classifications for Grid Navigation (Req 3 & 4)
     wall_left_detected: bool = False
@@ -281,6 +283,7 @@ class RobotSensorSnapshot:
             "tof_raw": self.tof_raw,
             "tof_filtered_mm": self.tof_filtered_mm,
             "tof_valid": self.tof_valid,
+            "tof_sample_id": self.tof_sample_id,
             "yaw": self.yaw,
             "yaw_raw": self.yaw_raw,
             "pitch": self.pitch,
@@ -292,7 +295,8 @@ class RobotSensorSnapshot:
             "pos_y_raw": self.pos_y_raw,
             "vel_vx": self.vel_vx,
             "vel_vy": self.vel_vy,
-            "gripper_status": self.gripper_status,
+            "gimbal_yaw": self.gimbal_yaw,
+            "gimbal_pitch": self.gimbal_pitch,
             "wall_left": self.wall_left_detected,
             "wall_right": self.wall_right_detected,
             "wall_front": self.wall_front_detected,
@@ -391,6 +395,7 @@ class SensorCollectorThread(threading.Thread):
         self._raw_sharp_left: Optional[float] = None
         self._raw_sharp_right: Optional[float] = None
         self._raw_tof: Optional[float] = None
+        self._tof_sample_id: int = 0
         self._raw_attitude: Tuple[float, float, float] = (0.0, 0.0, 0.0)
         self._raw_position: Tuple[float, float, float] = (0.0, 0.0, 0.0)
         self._raw_velocity: Tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -400,7 +405,8 @@ class SensorCollectorThread(threading.Thread):
         self._is_static: bool = True
         self._impact: bool = False
         self._slip: bool = False
-        self._gripper_status: str = "normal"
+        self._raw_gimbal_yaw: float = 0.0
+        self._raw_gimbal_pitch: float = 0.0
         self._initial_yaw_offset: Optional[float] = None
         self._initial_pos_offset: Optional[Tuple[float, float]] = None
 
@@ -410,8 +416,10 @@ class SensorCollectorThread(threading.Thread):
         with self._raw_lock:
             if isinstance(distance_info, (list, tuple)) and len(distance_info) > 0:
                 self._raw_tof = float(distance_info[0])
+                self._tof_sample_id += 1
             elif isinstance(distance_info, (int, float)):
                 self._raw_tof = float(distance_info)
+                self._tof_sample_id += 1
 
     def _cb_adapter(self, adapter_info):
         """Sensor adapter callback (contains IO & ADC for 6 adapter ports)."""
@@ -459,9 +467,11 @@ class SensorCollectorThread(threading.Thread):
                 if len(status_info) >= 9:
                     self._impact = any(abs(float(status_info[i])) > 0 for i in (6, 7, 8))
 
-    def _cb_gripper(self, gripper_status):
+    def _cb_gimbal_angle(self, angle_info):
         with self._raw_lock:
-            self._gripper_status = str(gripper_status)
+            if isinstance(angle_info, (list, tuple)) and len(angle_info) >= 2:
+                self._raw_gimbal_pitch = float(angle_info[0])
+                self._raw_gimbal_yaw = float(angle_info[1])
 
     def setup_subscriptions(self):
         """Subscribes to RoboMaster SDK telemetry streams."""
@@ -480,8 +490,8 @@ class SensorCollectorThread(threading.Thread):
                 self.robot.chassis.sub_imu(freq=20, callback=self._cb_imu)
                 self.robot.chassis.sub_esc(freq=20, callback=self._cb_esc)
                 self.robot.chassis.sub_status(freq=20, callback=self._cb_status)
-            if hasattr(self.robot, "gripper"):
-                self.robot.gripper.sub_status(freq=10, callback=self._cb_gripper)
+            if hasattr(self.robot, "gimbal"):
+                self.robot.gimbal.sub_angle(freq=20, callback=self._cb_gimbal_angle)
         except Exception as exc:
             print(f"[SensorCollectorThread] Subscription warning: {exc}")
 
@@ -502,8 +512,8 @@ class SensorCollectorThread(threading.Thread):
                 self.robot.chassis.unsub_imu()
                 self.robot.chassis.unsub_esc()
                 self.robot.chassis.unsub_status()
-            if hasattr(self.robot, "gripper"):
-                self.robot.gripper.unsub_status()
+            if hasattr(self.robot, "gimbal"):
+                self.robot.gimbal.unsub_angle()
         except Exception as exc:
             print(f"[SensorCollectorThread] Unsubscribe warning: {exc}")
 
@@ -573,6 +583,7 @@ class SensorCollectorThread(threading.Thread):
                 raw_sl = self._raw_sharp_left
                 raw_sr = self._raw_sharp_right
                 raw_tof = self._raw_tof
+                tof_sample_id = self._tof_sample_id
                 att = self._raw_attitude
                 pos = self._raw_position
                 vel = self._raw_velocity
@@ -582,7 +593,8 @@ class SensorCollectorThread(threading.Thread):
                 is_stat = self._is_static
                 impact = self._impact
                 slip = self._slip
-                grip = self._gripper_status
+                g_yaw = self._raw_gimbal_yaw
+                g_pitch = self._raw_gimbal_pitch
 
             # Heading (Yaw) Zeroing: Locks initial robot heading to 0.0 deg
             raw_yaw = att[0] if att and len(att) > 0 else 0.0
@@ -628,11 +640,11 @@ class SensorCollectorThread(threading.Thread):
             wall_right = False
             wall_front = False
 
-            if mm_left is not None and mm_left < 280.0:
+            if mm_left is not None and mm_left < 450.0:
                 wall_left = True
-            if mm_right is not None and mm_right < 280.0:
+            if mm_right is not None and mm_right < 450.0:
                 wall_right = True
-            if mm_tof is not None and mm_tof < 350.0:
+            if mm_tof is not None and mm_tof < 450.0:
                 wall_front = True
 
             if mm_left is not None and mm_right is not None and wall_left and wall_right:
@@ -656,6 +668,7 @@ class SensorCollectorThread(threading.Thread):
                 tof_raw=raw_tof,
                 tof_filtered_mm=mm_tof,
                 tof_valid=tof_valid and (mm_tof is not None),
+                tof_sample_id=tof_sample_id,
                 yaw=norm_yaw,
                 yaw_raw=raw_yaw,
                 pitch=att[1],
@@ -679,7 +692,8 @@ class SensorCollectorThread(threading.Thread):
                 is_static=is_stat,
                 impact_detected=impact,
                 slip_detected=slip,
-                gripper_status=grip,
+                gimbal_yaw=g_yaw,
+                gimbal_pitch=g_pitch,
                 wall_left_detected=wall_left,
                 wall_right_detected=wall_right,
                 wall_front_detected=wall_front,
@@ -708,7 +722,8 @@ class SensorCollectorThread(threading.Thread):
         yaw: float = 0.0,
         pos_x: float = 0.0,
         pos_y: float = 0.0,
-        gripper_status: str = "normal",
+        gimbal_yaw: float = 0.0,
+        gimbal_pitch: float = 0.0,
     ):
         with self._raw_lock:
             if sharp_left_adc is not None:
@@ -719,4 +734,5 @@ class SensorCollectorThread(threading.Thread):
                 self._raw_tof = tof_dist
             self._raw_attitude = (yaw, self._raw_attitude[1], self._raw_attitude[2])
             self._raw_position = (pos_x, pos_y, self._raw_position[2])
-            self._gripper_status = gripper_status
+            self._raw_gimbal_yaw = gimbal_yaw
+            self._raw_gimbal_pitch = gimbal_pitch

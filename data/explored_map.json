@@ -1,0 +1,606 @@
+{
+    "grid_info": {
+        "rows": 6,
+        "cols": 6,
+        "grid_size_px": 100,
+        "grid_size_m": 0.6
+    },
+    "start": [
+        1,
+        5
+    ],
+    "visited_cells": [
+        [
+            0,
+            2
+        ],
+        [
+            0,
+            3
+        ],
+        [
+            1,
+            3
+        ],
+        [
+            2,
+            3
+        ],
+        [
+            0,
+            4
+        ],
+        [
+            1,
+            4
+        ],
+        [
+            0,
+            5
+        ],
+        [
+            1,
+            5
+        ]
+    ],
+    "scanned_cells": [
+        [
+            0,
+            2
+        ],
+        [
+            0,
+            3
+        ],
+        [
+            1,
+            3
+        ],
+        [
+            2,
+            3
+        ],
+        [
+            0,
+            4
+        ],
+        [
+            1,
+            4
+        ],
+        [
+            0,
+            5
+        ],
+        [
+            1,
+            5
+        ]
+    ],
+    "walls": [
+        {
+            "pos": [
+                0,
+                0
+            ],
+            "walls": {
+                "top": true,
+                "bottom": false,
+                "left": true,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                1,
+                0
+            ],
+            "walls": {
+                "top": true,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                2,
+                0
+            ],
+            "walls": {
+                "top": true,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                3,
+                0
+            ],
+            "walls": {
+                "top": true,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                4,
+                0
+            ],
+            "walls": {
+                "top": true,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                5,
+                0
+            ],
+            "walls": {
+                "top": true,
+                "bottom": false,
+                "left": false,
+                "right": true
+            }
+        },
+        {
+            "pos": [
+                0,
+                1
+            ],
+            "walls": {
+                "top": false,
+                "bottom": true,
+                "left": true,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                1,
+                1
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                2,
+                1
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                3,
+                1
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                4,
+                1
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                5,
+                1
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": true
+            }
+        },
+        {
+            "pos": [
+                0,
+                2
+            ],
+            "walls": {
+                "top": true,
+                "bottom": false,
+                "left": true,
+                "right": true
+            }
+        },
+        {
+            "pos": [
+                1,
+                2
+            ],
+            "walls": {
+                "top": false,
+                "bottom": true,
+                "left": true,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                2,
+                2
+            ],
+            "walls": {
+                "top": false,
+                "bottom": true,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                3,
+                2
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                4,
+                2
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                5,
+                2
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": true
+            }
+        },
+        {
+            "pos": [
+                0,
+                3
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": true,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                1,
+                3
+            ],
+            "walls": {
+                "top": true,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                2,
+                3
+            ],
+            "walls": {
+                "top": true,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                3,
+                3
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                4,
+                3
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                5,
+                3
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": true
+            }
+        },
+        {
+            "pos": [
+                0,
+                4
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": true,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                1,
+                4
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": true
+            }
+        },
+        {
+            "pos": [
+                2,
+                4
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": true,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                3,
+                4
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                4,
+                4
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                5,
+                4
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": false,
+                "right": true
+            }
+        },
+        {
+            "pos": [
+                0,
+                5
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": true,
+                "right": true
+            }
+        },
+        {
+            "pos": [
+                1,
+                5
+            ],
+            "walls": {
+                "top": false,
+                "bottom": false,
+                "left": true,
+                "right": true
+            }
+        },
+        {
+            "pos": [
+                2,
+                5
+            ],
+            "walls": {
+                "top": false,
+                "bottom": true,
+                "left": true,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                3,
+                5
+            ],
+            "walls": {
+                "top": false,
+                "bottom": true,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                4,
+                5
+            ],
+            "walls": {
+                "top": false,
+                "bottom": true,
+                "left": false,
+                "right": false
+            }
+        },
+        {
+            "pos": [
+                5,
+                5
+            ],
+            "walls": {
+                "top": false,
+                "bottom": true,
+                "left": false,
+                "right": true
+            }
+        }
+    ],
+    "targets": [],
+    "exploration_time_seconds": 372.4380000000019,
+    "exploration_history": [
+        {
+            "step": 1,
+            "pos": [
+                1,
+                4
+            ],
+            "facing": "North (Up)"
+        },
+        {
+            "step": 2,
+            "pos": [
+                1,
+                3
+            ],
+            "facing": "North (Up)"
+        },
+        {
+            "step": 3,
+            "pos": [
+                0,
+                3
+            ],
+            "facing": "West (Left)"
+        },
+        {
+            "step": 4,
+            "pos": [
+                0,
+                4
+            ],
+            "facing": "South (Down)"
+        },
+        {
+            "step": 5,
+            "pos": [
+                0,
+                5
+            ],
+            "facing": "South (Down)"
+        },
+        {
+            "step": 6,
+            "pos": [
+                0,
+                4
+            ],
+            "facing": "North (Up)"
+        },
+        {
+            "step": 7,
+            "pos": [
+                0,
+                3
+            ],
+            "facing": "North (Up)"
+        },
+        {
+            "step": 8,
+            "pos": [
+                0,
+                2
+            ],
+            "facing": "North (Up)"
+        },
+        {
+            "step": 9,
+            "pos": [
+                0,
+                3
+            ],
+            "facing": "South (Down)"
+        },
+        {
+            "step": 10,
+            "pos": [
+                1,
+                3
+            ],
+            "facing": "East (Right)"
+        },
+        {
+            "step": 11,
+            "pos": [
+                2,
+                3
+            ],
+            "facing": "East (Right)"
+        }
+    ]
+}

@@ -60,12 +60,14 @@ class RobotSystem:
             robot_mod = calibrate.load_robot_sdk()
             self.robot = robot_mod.Robot()
             self.robot.initialize(conn_type=self.conn_type)
+            try:
+                self.robot.set_robot_mode(mode=robot_mod.FREE)
+            except Exception as e:
+                print(f"[RobotSystem] Note on robot mode: {e}")
             print("[RobotSystem] Successfully connected to RoboMaster EP!")
             return True
         except Exception as exc:
             print(f"[RobotSystem] Connection failed: {exc}")
-            print("[RobotSystem] Switching to MOCK mode fallback.")
-            self.mock_mode = True
             self.robot = None
             return False
 

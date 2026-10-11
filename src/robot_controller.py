@@ -115,7 +115,7 @@ class RobotControllerThread(threading.Thread):
         robot: Any = None,
         mock_mode: bool = False,
         grid_size_m: float = 0.60,
-        nominal_side_dist_mm: float = 140.0,
+        nominal_side_dist_mm: float = 200.0,
         base_speed: float = 0.25,
     ):
         super().__init__(name="RobotControllerThread-2", daemon=True)
@@ -197,8 +197,8 @@ class RobotControllerThread(threading.Thread):
             except Exception:
                 pass
 
-    def back_away_from_front_wall(self, target_mm: float = 250.0,
-                                  tolerance_mm: float = 15.0,
+    def back_away_from_front_wall(self, target_mm: float = 300.0,
+                                  tolerance_mm: float = 20.0,
                                   max_duration_sec: float = 3.0,
                                   max_reverse_speed: float = 0.12) -> bool:
         """Reverse slowly until a valid front ToF reading reaches the requested clearance."""
@@ -356,9 +356,9 @@ class RobotControllerThread(threading.Thread):
                     print("  [MOVE ABORTED] ToF became invalid during the grid step; stopping chassis.")
                     break
                 if state.tof_filtered_mm < 250.0:
-                    print(f"  [Front Wall Too Close] ToF={state.tof_filtered_mm:.1f} mm; backing away toward 250 mm.")
+                    print(f"  [Front Wall Too Close] ToF={state.tof_filtered_mm:.1f} mm; backing away to 300 ± 20 mm.")
                     self.stop_chassis()
-                    self.back_away_from_front_wall(target_mm=250.0, tolerance_mm=0.0)
+                    self.back_away_from_front_wall(target_mm=300.0, tolerance_mm=20.0)
                     break
 
             # 3. Check remaining distance to grid cell boundary (60 cm)

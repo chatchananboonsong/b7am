@@ -93,9 +93,8 @@ class PIDController:
 class WallCenteringPID:
     """Implements Step 3 Wall Centering across the 8 REQ cases."""
 
-    # Default parameters based on 60x60cm Grid & 25cm Robot
-    # Corridor inner width ~ 525mm, Robot width 250mm -> ~137.5mm each side
-    DEFAULT_NOMINAL_SIDE_MM = 140.0
+    # Requested wall-following clearance from the nearest side wall: 200 mm.
+    DEFAULT_NOMINAL_SIDE_MM = 200.0
     DEADBAND_TOLERANCE_MM = 12.5  # 2 cm tolerance as specified in REQ (|L-R| < 2cm, L/R +- 2cm)
     WALL_DETECT_THRESHOLD_MM = 450.0  # Max distance to consider a wall present (45 cm)
     FRONT_WALL_STOP_MM = 150.0  # Distance from front ToF to front wall at grid center
@@ -105,7 +104,7 @@ class WallCenteringPID:
         nominal_side_dist_mm: float = DEFAULT_NOMINAL_SIDE_MM,
         tolerance_mm: float = DEADBAND_TOLERANCE_MM,
         front_target_mm: float = FRONT_WALL_STOP_MM,
-        preferred_side_mm: float = 150.0,
+        preferred_side_mm: float = 200.0,
         lateral_kp: float = 0.0010,  # Smooth lateral centering (50mm error -> ~0.09 m/s)
         lateral_ki: float = 0.0001,
         lateral_kd: float = 0.0010,  # Damping to prevent oscillating across corridor

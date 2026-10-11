@@ -937,6 +937,30 @@ class AutonomousExplorer:
         if self.controller:
             self.controller.stop_chassis()
         self._tick_dashboard("BASE STOPPED | WALL SCAN COMPLETE")
+
+        # Before any target scan or forward step, restore front clearance if
+        # the robot is closer than 28 cm. Distances under 40 cm trigger this
+        # check; 30 ± 2 cm is the requested retreat clearance.
+        if not self.mock_mode:
+            front_state = self.sensor_hub.get_latest_state()
+            if not front_state.tof_valid or front_state.tof_filtered_mm is None:
+                print("  [PRE-MOVE BLOCKED] ToF is invalid; cannot verify front clearance.")
+                return False
+            front_mm = float(front_state.tof_filtered_mm)
+            if front_mm < 400.0:
+                print(f"  [PRE-MOVE] Front distance is {front_mm:.1f} mm (<400 mm).")
+                if front_mm < 280.0:
+                    if not self.controller.back_away_from_front_wall(
+                        target_mm=300.0, tolerance_mm=20.0
+                    ):
+                        print("  [PRE-MOVE BLOCKED] Could not retreat to 300 ± 20 mm clearance.")
+                        return False
+                    front_state = self.sensor_hub.get_latest_state()
+                    if (not front_state.tof_valid or front_state.tof_filtered_mm is None
+                            or not 280.0 <= front_state.tof_filtered_mm <= 320.0):
+                        print("  [PRE-MOVE BLOCKED] Front distance is outside 300 ± 20 mm after retreat.")
+                        return False
+
         current_cell = self.map.cells[self.current_row][self.current_col]
         if self.target_scan_config and not current_cell.get("targets_scanned", False):
             relative_wall_directions = {
@@ -949,30 +973,6 @@ class AutonomousExplorer:
                 self.target_scan_config["directions"]
             )
             if selected_wall_directions:
-                # Create enough front clearance before the camera starts
-                # checking, aiming, or firing at a target. Keep at least
-                # 250 mm of measured front clearance.
-                state = self.sensor_hub.get_latest_state()
-                if not self.mock_mode:
-                    if not state.tof_valid or state.tof_filtered_mm is None:
-                        print("  [TARGET SCAN BLOCKED] ToF is invalid; refusing to aim/fire without front clearance.")
-                        return False
-                    if state.tof_filtered_mm < 250.0:
-                        print(
-                            f"  [TARGET SCAN] Front clearance is {state.tof_filtered_mm:.1f} mm; "
-                            "backing away to 250 mm before checking the target."
-                        )
-                        if not self.controller.back_away_from_front_wall(
-                            target_mm=250.0, tolerance_mm=0.0
-                        ):
-                            print("  [TARGET SCAN BLOCKED] Could not create safe front clearance; skipping aim/fire.")
-                            return False
-                        state = self.sensor_hub.get_latest_state()
-                        if (not state.tof_valid or state.tof_filtered_mm is None
-                                or state.tof_filtered_mm < 250.0):
-                            print("  [TARGET SCAN BLOCKED] Front distance is still below 250 mm; skipping aim/fire.")
-                            return False
-
                 if not self._scan_and_fire_targets(relative_wall_directions):
                     return False
                 current_cell["targets_scanned"] = True
@@ -1012,11 +1012,11 @@ class AutonomousExplorer:
         if has_front and state.tof_filtered_mm is not None and state.tof_filtered_mm < 250.0:
             print(
                 f"  [COLLISION PREVENTED] ToF front sensor is closer than 250 mm ({state.tof_filtered_mm:.1f} mm)! "
-                f"Backing away before stopping this route step."
+                f"Backing away to 300 ± 20 mm before stopping this route step."
             )
             # Match the in-step safety behavior: retreat to a safe clearance
             # before aborting, instead of merely refusing to issue a command.
-            self.controller.back_away_from_front_wall(target_mm=250.0, tolerance_mm=0.0)
+            self.controller.back_away_from_front_wall(target_mm=300.0, tolerance_mm=20.0)
             # Update map with confirmed wall
             self.map.set_wall(
                 self.current_col, self.current_row,
